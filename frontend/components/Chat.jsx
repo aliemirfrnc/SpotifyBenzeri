@@ -25,11 +25,7 @@ export default function Chat() {
         { type: "assistant", text: data.response },
       ]);
     } catch (err) {
-      if (err.message.includes("429")) {
-        setError("Günlük mesaj limitine ulaştın.");
-      } else {
-        setError("Mesaj gönderilemedi.");
-      }
+      setError(err.message || "Mesaj gönderilemedi.");
     } finally {
       setLoading(false);
     }

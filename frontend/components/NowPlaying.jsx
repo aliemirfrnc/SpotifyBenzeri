@@ -2,26 +2,41 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 
 export default function NowPlaying({ onTrackChange, onProgress }) {
-  const [sessionId, setSessionId] = useState(null);
+  const [connected, setConnected] = useState(null);
   const [track, setTrack] = useState(null);
   const [error, setError] = useState(null);
   const lastTrackKey = useRef(null);
 
+  const checkStatus = useCallback(() => {
+    api
+      .spotifyStatus()
+      .then((data) => setConnected(data.connected))
+      .catch(() => setConnected(false));
+  }, []);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const fromUrl = params.get("spotify_session");
-    if (fromUrl) {
-      localStorage.setItem("spotify_session", fromUrl);
+    if (params.get("spotify_connected")) {
       window.history.replaceState({}, "", window.location.pathname);
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSessionId(fromUrl || localStorage.getItem("spotify_session"));
+    checkStatus();
+  }, [checkStatus]);
+
+  const prefetchNext = useCallback(() => {
+    api
+      .getQueue()
+      .then((q) => {
+        if (q.track_name) {
+          api.getLyrics(q.track_name, q.artist || "").catch(() => {});
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const fetchTrack = useCallback(() => {
-    if (!sessionId) return;
+    if (!connected) return;
     api
-      .getCurrentTrack(sessionId)
+      .getCurrentTrack()
       .then((data) => {
         setTrack(data);
         setError(null);
@@ -31,28 +46,28 @@ export default function NowPlaying({ onTrackChange, onProgress }) {
           if (key !== lastTrackKey.current) {
             lastTrackKey.current = key;
             onTrackChange?.(data.track_name, data.artist);
+            prefetchNext();
           }
         }
 
         onProgress?.(data.progress_ms, data.duration_ms, data.is_playing);
       })
       .catch((err) => {
-        if (err.message.includes("401")) {
-          localStorage.removeItem("spotify_session");
-          setSessionId(null);
+        if (err.status === 401 || err.status === 404) {
+          setConnected(false);
           setTrack(null);
         } else {
-          setError("Spotify verisi alınamadı.");
+          setError(err.message || "Spotify verisi alınamadı.");
         }
       });
-  }, [sessionId, onTrackChange, onProgress]);
+  }, [connected, onTrackChange, onProgress, prefetchNext]);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!connected) return;
     fetchTrack();
     const interval = setInterval(fetchTrack, 2000);
     return () => clearInterval(interval);
-  }, [sessionId, fetchTrack]);
+  }, [connected, fetchTrack]);
 
   const handleConnect = () => {
     window.location.href = api.spotifyLoginUrl();
@@ -60,28 +75,28 @@ export default function NowPlaying({ onTrackChange, onProgress }) {
 
   const handlePlayPause = () => {
     const action = track?.is_playing ? api.spotifyPause : api.spotifyPlay;
-    action(sessionId)
+    action()
       .then(fetchTrack)
-      .catch(() =>
-        setError("Komut gönderilemedi. Aktif bir Spotify cihazı açık mı?"),
-      );
+      .catch((err) => setError(err.message || "Komut gönderilemedi."));
   };
 
   const handleNext = () => {
     api
-      .spotifyNext(sessionId)
+      .spotifyNext()
       .then(() => setTimeout(fetchTrack, 500))
-      .catch(() => setError("Sıradaki şarkıya geçilemedi."));
+      .catch((err) => setError(err.message || "Sıradaki şarkıya geçilemedi."));
   };
 
   const handlePrevious = () => {
     api
-      .spotifyPrevious(sessionId)
+      .spotifyPrevious()
       .then(() => setTimeout(fetchTrack, 500))
-      .catch(() => setError("Önceki şarkıya geçilemedi."));
+      .catch((err) => setError(err.message || "Önceki şarkıya geçilemedi."));
   };
 
-  if (!sessionId) {
+  if (connected === null) return null;
+
+  if (!connected) {
     return (
       <div style={cardStyle}>
         <p
