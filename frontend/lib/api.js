@@ -146,30 +146,27 @@ export const api = {
   },
 
   async translateLine(text) {
-    const res = await fetch(`${BASE_URL}/translate-line`, {
+    return authFetch(`${BASE_URL}/translate-line`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
     });
-    return handleResponse(res);
   },
 
   async translateBatch(lines) {
-    const res = await fetch(`${BASE_URL}/translate-batch`, {
+    return authFetch(`${BASE_URL}/translate-batch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ lines }),
     });
-    return handleResponse(res);
   },
 
   async chat(message) {
-    const res = await fetch(`${BASE_URL}/chat`, {
+    return authFetch(`${BASE_URL}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message }),
     });
-    return handleResponse(res);
   },
 
   async getLyrics(track, artist = "") {
@@ -179,17 +176,16 @@ export const api = {
   },
 
   async getWordInfo(word, contextLine = "") {
-    const res = await fetch(`${BASE_URL}/word-info`, {
+    return authFetch(`${BASE_URL}/word-info`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ word, context_line: contextLine }),
     });
-    return handleResponse(res);
   },
 
-  spotifyLoginUrl() {
-    const token = getAccessToken();
-    return `${BASE_URL}/spotify/login?token=${encodeURIComponent(token || "")}`;
+  async spotifyConnectUrl() {
+    const data = await authFetch(`${BASE_URL}/spotify/connect-token`);
+    return `${BASE_URL}/spotify/login?token=${encodeURIComponent(data.connect_token)}`;
   },
 
   async spotifyStatus() {

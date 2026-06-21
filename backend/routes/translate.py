@@ -1,17 +1,22 @@
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 
 from deep_translator import GoogleTranslator
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from backend.core.cache_store import load, save
+from backend.routes.auth import require_user_id
 
 router = APIRouter()
 
 _cache: dict[str, str] = load("translations")
 _cache_lock = threading.Lock()
 _executor = ThreadPoolExecutor(max_workers=5)
+
+_rate_limit: dict[int, tuple[date, int]] = {}
+DAILY_LIMIT = 500
 
 
 class TranslateRequest(BaseModel):
@@ -31,8 +36,20 @@ class TranslateBatchResponse(BaseModel):
     failed: list[str]
 
 
+def _check_rate_limit(user_id: int, cost: int = 1) -> None:
+    today = date.today()
+    last_date, count = _rate_limit.get(user_id, (today, 0))
+
+    if last_date != today:
+        count = 0
+
+    if count + cost > DAILY_LIMIT:
+        raise HTTPException(status_code=429, detail="Günlük çeviri limitine ulaştın.")
+
+    _rate_limit[user_id] = (today, count + cost)
+
+
 def _translate_cached(text: str) -> tuple[str | None, bool]:
-    """İkinci eleman: cache'e yeni eklenip eklenmediği (diske yazma kararı için)."""
     key = text.strip()
     if not key:
         return "", False
@@ -54,7 +71,9 @@ def _translate_cached(text: str) -> tuple[str | None, bool]:
 
 
 @router.post("/translate-line", response_model=TranslateResponse)
-def translate_line(request: TranslateRequest):
+def translate_line(request: TranslateRequest, user_id: int = Depends(require_user_id)):
+    _check_rate_limit(user_id)
+
     result, added = _translate_cached(request.text)
     if result is None:
         raise HTTPException(
@@ -70,8 +89,10 @@ def translate_line(request: TranslateRequest):
 
 
 @router.post("/translate-batch", response_model=TranslateBatchResponse)
-def translate_batch(request: TranslateBatchRequest):
+def translate_batch(request: TranslateBatchRequest, user_id: int = Depends(require_user_id)):
     lines = [l for l in request.lines if l.strip()]
+    _check_rate_limit(user_id, cost=max(1, len(lines)))
+
     results: dict[str, str] = {}
     failed: list[str] = []
     any_added = False

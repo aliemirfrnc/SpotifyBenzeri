@@ -1,4 +1,5 @@
 import secrets
+import threading
 import time
 from urllib.parse import urlencode
 
@@ -14,17 +15,29 @@ from backend.core.config import (
     FRONTEND_URL,
 )
 from backend.core.db import get_conn, get_lock
-from backend.core.auth import decode_access_token
 from backend.routes.auth import require_user_id
 
 router = APIRouter(prefix="/spotify")
 
 SCOPE = "user-read-currently-playing user-read-playback-state user-modify-playback-state"
 
+CONNECT_TOKEN_TTL_SECONDS = 120
+
 NO_ACTIVE_DEVICE_MESSAGE = (
     "Spotify açık bir cihazda çalmıyor. Telefonunda veya bilgisayarında "
     "Spotify uygulamasını aç, bir şarkı başlat, sonra tekrar dene."
 )
+
+# user_id -> threading.Lock, eşzamanlı token yenilemesini önlemek için
+_refresh_locks: dict[int, threading.Lock] = {}
+_refresh_locks_guard = threading.Lock()
+
+
+def _get_refresh_lock(user_id: int) -> threading.Lock:
+    with _refresh_locks_guard:
+        if user_id not in _refresh_locks:
+            _refresh_locks[user_id] = threading.Lock()
+        return _refresh_locks[user_id]
 
 
 class CurrentTrackResponse(BaseModel):
@@ -43,6 +56,10 @@ class QueueResponse(BaseModel):
 
 class StatusResponse(BaseModel):
     connected: bool
+
+
+class ConnectTokenResponse(BaseModel):
+    connect_token: str
 
 
 def _save_spotify_tokens(user_id: int, access_token: str, refresh_token: str, expires_in: int) -> None:
@@ -80,16 +97,43 @@ def spotify_status(user_id: int = Depends(require_user_id)):
     return {"connected": row is not None}
 
 
+@router.get("/connect-token", response_model=ConnectTokenResponse)
+def connect_token(user_id: int = Depends(require_user_id)):
+    """Tam sayfa yönlendirmesi gerektiren /spotify/login adımı için
+    tek kullanımlık, kısa ömürlü bir token üretir. Gerçek JWT access
+    token'ın tarayıcı geçmişine/loglara düz metin yazılmasını önler."""
+    token = secrets.token_urlsafe(24)
+    conn = get_conn()
+    with get_lock():
+        conn.execute(
+            "INSERT INTO spotify_connect_tokens (token, user_id, created_at) VALUES (?, ?, ?)",
+            (token, user_id, time.time()),
+        )
+        conn.commit()
+    return {"connect_token": token}
+
+
 @router.get("/login")
 def spotify_login(token: str = Query(...)):
-    # Tam sayfa yönlendirmesi olduğu için Authorization header kullanılamıyor,
-    # bu yüzden auth token query parametresiyle geliyor.
-    user_id = decode_access_token(token)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Oturum süresi dolmuş, tekrar giriş yap.")
+    conn = get_conn()
+    with get_lock():
+        cur = conn.execute(
+            "SELECT user_id, created_at FROM spotify_connect_tokens WHERE token = ?",
+            (token,),
+        )
+        row = cur.fetchone()
+        if row:
+            conn.execute("DELETE FROM spotify_connect_tokens WHERE token = ?", (token,))
+            conn.commit()
+
+    if not row:
+        raise HTTPException(status_code=401, detail="Bağlantı isteği geçersiz, sayfayı yenileyip tekrar dene.")
+
+    user_id, created_at = row
+    if time.time() - created_at > CONNECT_TOKEN_TTL_SECONDS:
+        raise HTTPException(status_code=401, detail="Bağlantı isteğinin süresi doldu, tekrar dene.")
 
     state = secrets.token_urlsafe(24)
-    conn = get_conn()
     with get_lock():
         conn.execute(
             "INSERT INTO oauth_states (state, user_id, created_at) VALUES (?, ?, ?)",
@@ -134,6 +178,7 @@ def spotify_callback(code: str = Query(...), state: str = Query(...)):
     )
 
     if resp.status_code != 200:
+        print("SPOTIFY TOKEN ERROR:", resp.status_code, resp.text)
         raise HTTPException(status_code=400, detail="Spotify yetkilendirme başarısız.")
 
     data = resp.json()
@@ -143,13 +188,17 @@ def spotify_callback(code: str = Query(...), state: str = Query(...)):
 
 
 def _get_valid_token(user_id: int) -> str:
-    row = _get_spotify_row(user_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="Spotify bağlantısı bulunamadı.")
+    lock = _get_refresh_lock(user_id)
+    with lock:
+        row = _get_spotify_row(user_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Spotify bağlantısı bulunamadı.")
 
-    access_token, refresh_token, expires_at = row
+        access_token, refresh_token, expires_at = row
 
-    if time.time() >= expires_at - 30:
+        if time.time() < expires_at - 30:
+            return access_token
+
         resp = requests.post(
             "https://accounts.spotify.com/api/token",
             data={
@@ -160,14 +209,13 @@ def _get_valid_token(user_id: int) -> str:
             },
         )
         if resp.status_code != 200:
+            print("SPOTIFY REFRESH ERROR:", resp.status_code, resp.text)
             raise HTTPException(status_code=401, detail="Spotify oturumu yenilenemedi, tekrar bağlan.")
 
         data = resp.json()
         new_refresh = data.get("refresh_token", refresh_token)
         _save_spotify_tokens(user_id, data["access_token"], new_refresh, data["expires_in"])
         return data["access_token"]
-
-    return access_token
 
 
 @router.get("/current-track", response_model=CurrentTrackResponse)

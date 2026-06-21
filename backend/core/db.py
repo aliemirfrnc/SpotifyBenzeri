@@ -49,7 +49,6 @@ def init_db() -> None:
             );
             """
         )
-        _conn.execute("DROP TABLE IF EXISTS auth_tokens")
         _conn.commit()
 
 

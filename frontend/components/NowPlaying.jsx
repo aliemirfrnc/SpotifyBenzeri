@@ -70,7 +70,14 @@ export default function NowPlaying({ onTrackChange, onProgress }) {
   }, [connected, fetchTrack]);
 
   const handleConnect = () => {
-    window.location.href = api.spotifyLoginUrl();
+    api
+      .spotifyConnectUrl()
+      .then((url) => {
+        window.location.href = url;
+      })
+      .catch((err) =>
+        setError(err.message || "Spotify bağlantısı başlatılamadı."),
+      );
   };
 
   const handlePlayPause = () => {

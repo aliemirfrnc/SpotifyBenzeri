@@ -2,20 +2,22 @@ import json
 import threading
 from datetime import date
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from groq import Groq
 from pydantic import BaseModel
 
+from backend.core.cache_store import load, save
 from backend.core.config import GROQ_API_KEY
+from backend.routes.auth import require_user_id
 
 router = APIRouter()
 
 client = Groq(api_key=GROQ_API_KEY)
 
-_cache: dict[str, dict] = {}
+_cache: dict[str, dict] = load("word_info")
 _cache_lock = threading.Lock()
 
-_rate_limit: dict[str, tuple[date, int]] = {}
+_rate_limit: dict[int, tuple[date, int]] = {}
 DAILY_LIMIT = 100
 
 SYSTEM_PROMPT = (
@@ -65,18 +67,18 @@ class WordInfoResponse(BaseModel):
     usage_note: str
 
 
-def _check_rate_limit(ip: str) -> None:
+def _check_rate_limit(user_id: int) -> None:
     today = date.today()
-    last_date, count = _rate_limit.get(ip, (today, 0))
+    last_date, count = _rate_limit.get(user_id, (today, 0))
 
     if last_date != today:
-        _rate_limit[ip] = (today, 1)
+        _rate_limit[user_id] = (today, 1)
         return
 
     if count >= DAILY_LIMIT:
         raise HTTPException(status_code=429, detail="Günlük kelime arama limitine ulaştın.")
 
-    _rate_limit[ip] = (today, count + 1)
+    _rate_limit[user_id] = (today, count + 1)
 
 
 def _clean_word(raw: str) -> str:
@@ -84,20 +86,18 @@ def _clean_word(raw: str) -> str:
 
 
 @router.post("/word-info", response_model=WordInfoResponse)
-def word_info(payload: WordInfoRequest, req: Request):
+def word_info(payload: WordInfoRequest, user_id: int = Depends(require_user_id)):
     word = _clean_word(payload.word)
     if not word:
         raise HTTPException(status_code=400, detail="Geçersiz kelime.")
 
-    # Context'e göre cache anahtarı değişiyor çünkü aynı kelime farklı satırlarda
-    # farklı bağlamsal anlam çıktısı üretebilir.
     cache_key = f"{word}::{payload.context_line.strip().lower()}"
 
     with _cache_lock:
         if cache_key in _cache:
             return _cache[cache_key]
 
-    _check_rate_limit(req.client.host)
+    _check_rate_limit(user_id)
 
     user_prompt = f'Word: "{word}"'
     if payload.context_line:
@@ -137,5 +137,6 @@ def word_info(payload: WordInfoRequest, req: Request):
 
     with _cache_lock:
         _cache[cache_key] = result
+        save("word_info", _cache)
 
     return result
