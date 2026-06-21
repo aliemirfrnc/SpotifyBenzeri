@@ -4,11 +4,12 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from backend.core.auth import (
-    create_token,
+    create_token_pair,
     create_user,
-    delete_token,
+    decode_access_token,
     get_user_by_email,
-    get_user_id_from_token,
+    revoke_refresh_token,
+    rotate_refresh_token,
     verify_password,
 )
 from backend.core.db import get_conn, get_lock
@@ -28,8 +29,17 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+
 class AuthResponse(BaseModel):
-    token: str
+    access_token: str
+    refresh_token: str
     email: str
 
 
@@ -45,7 +55,7 @@ def _extract_token(authorization: str | None) -> str:
 
 def require_user_id(authorization: str | None = Header(default=None)) -> int:
     token = _extract_token(authorization)
-    user_id = get_user_id_from_token(token)
+    user_id = decode_access_token(token)
     if not user_id:
         raise HTTPException(status_code=401, detail="Oturum süresi dolmuş, tekrar giriş yap.")
     return user_id
@@ -63,8 +73,8 @@ def register(payload: RegisterRequest):
         raise HTTPException(status_code=409, detail="Bu e-posta zaten kayıtlı.")
 
     user_id = create_user(email, payload.password)
-    token = create_token(user_id)
-    return {"token": token, "email": email}
+    access_token, refresh_token = create_token_pair(user_id, email)
+    return {"access_token": access_token, "refresh_token": refresh_token, "email": email}
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -75,8 +85,17 @@ def login(payload: LoginRequest):
     if not row or not verify_password(payload.password, row[2]):
         raise HTTPException(status_code=401, detail="E-posta veya şifre hatalı.")
 
-    token = create_token(row[0])
-    return {"token": token, "email": email}
+    access_token, refresh_token = create_token_pair(row[0], email)
+    return {"access_token": access_token, "refresh_token": refresh_token, "email": email}
+
+
+@router.post("/refresh", response_model=AuthResponse)
+def refresh(payload: RefreshRequest):
+    result = rotate_refresh_token(payload.refresh_token)
+    if not result:
+        raise HTTPException(status_code=401, detail="Oturum süresi dolmuş, tekrar giriş yap.")
+    access_token, refresh_token, email = result
+    return {"access_token": access_token, "refresh_token": refresh_token, "email": email}
 
 
 @router.get("/me", response_model=MeResponse)
@@ -92,7 +111,7 @@ def me(authorization: str | None = Header(default=None)):
 
 
 @router.post("/logout")
-def logout(authorization: str | None = Header(default=None)):
-    token = _extract_token(authorization)
-    delete_token(token)
+def logout(payload: LogoutRequest, authorization: str | None = Header(default=None)):
+    require_user_id(authorization)
+    revoke_refresh_token(payload.refresh_token)
     return {"status": "ok"}

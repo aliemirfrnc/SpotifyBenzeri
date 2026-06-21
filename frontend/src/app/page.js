@@ -4,7 +4,7 @@ import Auth from "../../components/Auth";
 import Chat from "../../components/Chat";
 import ErrorBanner from "../../components/ErrorBanner";
 import NowPlaying from "../../components/NowPlaying";
-import { api } from "../../lib/api";
+import { api, clearTokens } from "../../lib/api";
 
 export default function Home() {
   const [authChecked, setAuthChecked] = useState(false);
@@ -37,7 +37,7 @@ export default function Home() {
   const lastArtistRef = useRef("");
 
   useEffect(() => {
-    const token = localStorage.getItem("lingofy_token");
+    const token = localStorage.getItem("lingofy_access_token");
     if (!token) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setAuthChecked(true);
@@ -46,13 +46,12 @@ export default function Home() {
     api
       .me()
       .then((data) => setAuthEmail(data.email))
-      .catch(() => localStorage.removeItem("lingofy_token"))
+      .catch(() => clearTokens())
       .finally(() => setAuthChecked(true));
   }, []);
 
   const handleLogout = useCallback(() => {
     api.logout().catch(() => {});
-    localStorage.removeItem("lingofy_token");
     setAuthEmail(null);
   }, []);
 

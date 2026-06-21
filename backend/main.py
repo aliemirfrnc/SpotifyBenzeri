@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.core.auth import cleanup_expired
+from backend.core.config import JWT_SECRET
 from backend.core.db import init_db
 from backend.routes.auth import router as auth_router
 from backend.routes.chat import router as chat_router
@@ -17,7 +18,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:3000"],
+    allow_origins=["http://127.0.0.1:3000", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -44,6 +45,8 @@ def _cleanup_loop():
 
 @app.on_event("startup")
 def on_startup():
+    if not JWT_SECRET:
+        raise RuntimeError("JWT_SECRET ortam değişkeni tanımlı değil.")
     init_db()
     threading.Thread(target=lyrics_warmup, daemon=True).start()
     threading.Thread(target=_cleanup_loop, daemon=True).start()

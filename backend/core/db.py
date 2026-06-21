@@ -27,8 +27,8 @@ def init_db() -> None:
                 created_at REAL NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS auth_tokens (
-                token TEXT PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                token_hash TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 created_at REAL NOT NULL,
                 expires_at REAL NOT NULL
@@ -49,6 +49,7 @@ def init_db() -> None:
             );
             """
         )
+        _conn.execute("DROP TABLE IF EXISTS auth_tokens")
         _conn.commit()
 
 

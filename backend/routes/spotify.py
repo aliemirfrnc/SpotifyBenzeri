@@ -14,7 +14,8 @@ from backend.core.config import (
     FRONTEND_URL,
 )
 from backend.core.db import get_conn, get_lock
-from backend.routes.auth import require_user_id, get_user_id_from_token
+from backend.core.auth import decode_access_token
+from backend.routes.auth import require_user_id
 
 router = APIRouter(prefix="/spotify")
 
@@ -83,7 +84,7 @@ def spotify_status(user_id: int = Depends(require_user_id)):
 def spotify_login(token: str = Query(...)):
     # Tam sayfa yönlendirmesi olduğu için Authorization header kullanılamıyor,
     # bu yüzden auth token query parametresiyle geliyor.
-    user_id = get_user_id_from_token(token)
+    user_id = decode_access_token(token)
     if not user_id:
         raise HTTPException(status_code=401, detail="Oturum süresi dolmuş, tekrar giriş yap.")
 
