@@ -47,6 +47,12 @@ def init_db() -> None:
                 user_id INTEGER NOT NULL,
                 created_at REAL NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS spotify_connect_tokens (
+                token TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_at REAL NOT NULL
+            );
             """
         )
         _conn.commit()

@@ -5,8 +5,8 @@ import { api } from "../lib/api";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export default function Auth({ onAuthenticated }) {
-  const [mode, setMode] = useState("login");
+export default function Auth({ onAuthenticated, initialMode = "login" }) {
+  const [mode, setMode] = useState(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -119,11 +119,8 @@ export default function Auth({ onAuthenticated }) {
       <style jsx>{`
         .auth-card {
           width: 100%;
-          max-width: 380px;
-          background: #fff;
-          border-radius: 12px;
-          padding: 28px;
-          box-shadow: 0 4px 24px rgba(74, 27, 12, 0.08);
+          background: transparent;
+          padding: 0;
         }
         .auth-tabs {
           display: flex;
@@ -135,14 +132,14 @@ export default function Auth({ onAuthenticated }) {
           padding: 10px;
           border: none;
           border-radius: 8px;
-          background: #f5efe3;
-          color: #4a1b0c;
+          background: rgba(255, 255, 255, 0.055);
+          color: rgba(255, 255, 255, 0.56);
           font-size: 14px;
           cursor: pointer;
           transition: background 0.15s;
         }
         .auth-tabs button.active {
-          background: #c45c3e;
+          background: linear-gradient(135deg, #7759ff, #4c78ff);
           color: #fff;
         }
         .auth-form {
@@ -155,20 +152,21 @@ export default function Auth({ onAuthenticated }) {
           flex-direction: column;
           gap: 6px;
           font-size: 13px;
-          color: #4a1b0c;
+          color: rgba(255, 255, 255, 0.68);
           font-weight: 500;
         }
         .auth-form input {
           padding: 10px 12px;
-          border: 1px solid #e8ddd0;
+          border: 1px solid rgba(255, 255, 255, 0.1);
           border-radius: 8px;
           font-size: 14px;
-          color: #4a1b0c;
-          background: #faf6ee;
+          color: #fff;
+          background: rgba(255, 255, 255, 0.055);
         }
         .auth-form input:focus {
           outline: none;
-          border-color: #c45c3e;
+          border-color: #7a62ff;
+          box-shadow: 0 0 0 3px rgba(119, 89, 255, 0.12);
         }
         .auth-error {
           margin: 0;
@@ -180,11 +178,12 @@ export default function Auth({ onAuthenticated }) {
           padding: 12px;
           border: none;
           border-radius: 8px;
-          background: #4a1b0c;
+          background: linear-gradient(135deg, #7656ff, #4e7bff);
           color: #fff;
           font-size: 15px;
           font-weight: 500;
           cursor: pointer;
+          box-shadow: 0 12px 30px rgba(85, 70, 255, 0.24);
         }
         .auth-form button[type="submit"]:disabled {
           opacity: 0.6;

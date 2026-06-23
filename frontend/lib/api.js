@@ -1,4 +1,4 @@
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
 
 const ACCESS_KEY = "lingofy_access_token";
 const REFRESH_KEY = "lingofy_refresh_token";
@@ -49,6 +49,21 @@ async function handleResponse(res) {
   return res.json();
 }
 
+async function request(path, options = {}) {
+  if (!BASE_URL) {
+    throw new Error("API adresi yapılandırılmamış. NEXT_PUBLIC_API_URL değerini kontrol et.");
+  }
+
+  try {
+    return await fetch(`${BASE_URL}${path}`, options);
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    throw new Error("Sunucuya ulaşılamadı. Bağlantını ve API adresini kontrol et.", {
+      cause: error,
+    });
+  }
+}
+
 let refreshPromise = null;
 
 async function refreshAccessToken() {
@@ -58,7 +73,7 @@ async function refreshAccessToken() {
   }
 
   if (!refreshPromise) {
-    refreshPromise = fetch(`${BASE_URL}/auth/refresh`, {
+    refreshPromise = request("/auth/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refresh_token: refreshToken }),
@@ -76,8 +91,8 @@ async function refreshAccessToken() {
   return refreshPromise;
 }
 
-async function authFetch(url, options = {}, retried = false) {
-  const res = await fetch(url, {
+async function authFetch(path, options = {}, retried = false) {
+  const res = await request(path, {
     ...options,
     headers: {
       ...options.headers,
@@ -92,7 +107,7 @@ async function authFetch(url, options = {}, retried = false) {
       clearTokens();
       throw new Error("Oturum süresi dolmuş, tekrar giriş yap.");
     }
-    return authFetch(url, options, true);
+    return authFetch(path, options, true);
   }
 
   return handleResponse(res);
@@ -100,7 +115,7 @@ async function authFetch(url, options = {}, retried = false) {
 
 export const api = {
   async register(email, password) {
-    const res = await fetch(`${BASE_URL}/auth/register`, {
+    const res = await request("/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
@@ -111,7 +126,7 @@ export const api = {
   },
 
   async login(email, password) {
-    const res = await fetch(`${BASE_URL}/auth/login`, {
+    const res = await request("/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
@@ -122,7 +137,7 @@ export const api = {
   },
 
   async me() {
-    return authFetch(`${BASE_URL}/auth/me`);
+    return authFetch("/auth/me");
   },
 
   async logout() {
@@ -132,7 +147,7 @@ export const api = {
       return { status: "ok" };
     }
     try {
-      await authFetch(`${BASE_URL}/auth/logout`, {
+      await authFetch("/auth/logout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: refreshToken }),
@@ -146,7 +161,7 @@ export const api = {
   },
 
   async translateLine(text) {
-    return authFetch(`${BASE_URL}/translate-line`, {
+    return authFetch("/translate-line", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
@@ -154,7 +169,7 @@ export const api = {
   },
 
   async translateBatch(lines) {
-    return authFetch(`${BASE_URL}/translate-batch`, {
+    return authFetch("/translate-batch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ lines }),
@@ -162,21 +177,21 @@ export const api = {
   },
 
   async chat(message) {
-    return authFetch(`${BASE_URL}/chat`, {
+    return authFetch("/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message }),
     });
   },
 
-  async getLyrics(track, artist = "") {
+  async getLyrics(track, artist = "", options = {}) {
     const params = new URLSearchParams({ track, artist });
-    const res = await fetch(`${BASE_URL}/lyrics?${params}`);
+    const res = await request(`/lyrics?${params}`, options);
     return handleResponse(res);
   },
 
   async getWordInfo(word, contextLine = "") {
-    return authFetch(`${BASE_URL}/word-info`, {
+    return authFetch("/word-info", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ word, context_line: contextLine }),
@@ -184,35 +199,35 @@ export const api = {
   },
 
   async spotifyConnectUrl() {
-    const data = await authFetch(`${BASE_URL}/spotify/connect-token`);
+    const data = await authFetch("/spotify/connect-token");
     return `${BASE_URL}/spotify/login?token=${encodeURIComponent(data.connect_token)}`;
   },
 
   async spotifyStatus() {
-    return authFetch(`${BASE_URL}/spotify/status`);
+    return authFetch("/spotify/status");
   },
 
   async getCurrentTrack() {
-    return authFetch(`${BASE_URL}/spotify/current-track`);
+    return authFetch("/spotify/current-track");
   },
 
   async getQueue() {
-    return authFetch(`${BASE_URL}/spotify/queue`);
+    return authFetch("/spotify/queue");
   },
 
   async spotifyPlay() {
-    return authFetch(`${BASE_URL}/spotify/play`, { method: "PUT" });
+    return authFetch("/spotify/play", { method: "PUT" });
   },
 
   async spotifyPause() {
-    return authFetch(`${BASE_URL}/spotify/pause`, { method: "PUT" });
+    return authFetch("/spotify/pause", { method: "PUT" });
   },
 
   async spotifyNext() {
-    return authFetch(`${BASE_URL}/spotify/next`, { method: "POST" });
+    return authFetch("/spotify/next", { method: "POST" });
   },
 
   async spotifyPrevious() {
-    return authFetch(`${BASE_URL}/spotify/previous`, { method: "POST" });
+    return authFetch("/spotify/previous", { method: "POST" });
   },
 };

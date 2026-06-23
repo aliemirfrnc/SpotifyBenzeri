@@ -4,7 +4,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 from groq import Groq
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.core.cache_store import load, save
 from backend.core.config import GROQ_API_KEY
@@ -18,6 +18,7 @@ _cache: dict[str, dict] = load("word_info")
 _cache_lock = threading.Lock()
 
 _rate_limit: dict[int, tuple[date, int]] = {}
+_rate_limit_lock = threading.Lock()
 DAILY_LIMIT = 100
 
 SYSTEM_PROMPT = (
@@ -58,7 +59,7 @@ class WordInfoResponse(BaseModel):
     pronunciation: str
     definition: str
     contextual_meaning: str
-    register: str
+    register_: str = Field(alias="register", serialization_alias="register")
     frequency: str
     grammar_note: str
     synonyms: list[str]
@@ -68,17 +69,18 @@ class WordInfoResponse(BaseModel):
 
 
 def _check_rate_limit(user_id: int) -> None:
-    today = date.today()
-    last_date, count = _rate_limit.get(user_id, (today, 0))
+    with _rate_limit_lock:
+        today = date.today()
+        last_date, count = _rate_limit.get(user_id, (today, 0))
 
-    if last_date != today:
-        _rate_limit[user_id] = (today, 1)
-        return
+        if last_date != today:
+            _rate_limit[user_id] = (today, 1)
+            return
 
-    if count >= DAILY_LIMIT:
-        raise HTTPException(status_code=429, detail="Günlük kelime arama limitine ulaştın.")
+        if count >= DAILY_LIMIT:
+            raise HTTPException(status_code=429, detail="Günlük kelime arama limitine ulaştın.")
 
-    _rate_limit[user_id] = (today, count + 1)
+        _rate_limit[user_id] = (today, count + 1)
 
 
 def _clean_word(raw: str) -> str:

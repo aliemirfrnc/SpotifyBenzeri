@@ -91,7 +91,7 @@ def _fetch_get(track: str, artist: str, error_flag: list) -> dict | None:
         )
         if resp.status_code == 200:
             return _extract(resp.json())
-    except requests.RequestException as e:
+    except (requests.RequestException, ValueError, TypeError) as e:
         print("LYRICS GET ERROR:", repr(e))
         error_flag.append(True)
     return None
@@ -108,7 +108,7 @@ def _fetch_search(query: str, error_flag: list) -> dict | None:
             results = resp.json()
             if results:
                 return _extract(results[0])
-    except requests.RequestException as e:
+    except (requests.RequestException, ValueError, TypeError) as e:
         print("LYRICS SEARCH ERROR:", repr(e))
         error_flag.append(True)
     return None

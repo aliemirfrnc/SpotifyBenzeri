@@ -22,6 +22,7 @@ router = APIRouter(prefix="/spotify")
 SCOPE = "user-read-currently-playing user-read-playback-state user-modify-playback-state"
 
 CONNECT_TOKEN_TTL_SECONDS = 120
+SPOTIFY_TIMEOUT_SECONDS = 10
 
 NO_ACTIVE_DEVICE_MESSAGE = (
     "Spotify açık bir cihazda çalmıyor. Telefonunda veya bilgisayarında "
@@ -31,6 +32,22 @@ NO_ACTIVE_DEVICE_MESSAGE = (
 # user_id -> threading.Lock, eşzamanlı token yenilemesini önlemek için
 _refresh_locks: dict[int, threading.Lock] = {}
 _refresh_locks_guard = threading.Lock()
+
+
+def _spotify_request(method: str, url: str, **kwargs) -> requests.Response:
+    try:
+        return requests.request(
+            method,
+            url,
+            timeout=SPOTIFY_TIMEOUT_SECONDS,
+            **kwargs,
+        )
+    except requests.RequestException as exc:
+        print("SPOTIFY NETWORK ERROR:", repr(exc))
+        raise HTTPException(
+            status_code=502,
+            detail="Spotify servisine şu anda ulaşılamıyor. Lütfen tekrar dene.",
+        ) from exc
 
 
 def _get_refresh_lock(user_id: int) -> threading.Lock:
@@ -166,7 +183,8 @@ def spotify_callback(code: str = Query(...), state: str = Query(...)):
 
     user_id = row[0]
 
-    resp = requests.post(
+    resp = _spotify_request(
+        "POST",
         "https://accounts.spotify.com/api/token",
         data={
             "grant_type": "authorization_code",
@@ -199,7 +217,8 @@ def _get_valid_token(user_id: int) -> str:
         if time.time() < expires_at - 30:
             return access_token
 
-        resp = requests.post(
+        resp = _spotify_request(
+            "POST",
             "https://accounts.spotify.com/api/token",
             data={
                 "grant_type": "refresh_token",
@@ -222,7 +241,8 @@ def _get_valid_token(user_id: int) -> str:
 def current_track(user_id: int = Depends(require_user_id)):
     token = _get_valid_token(user_id)
 
-    resp = requests.get(
+    resp = _spotify_request(
+        "GET",
         "https://api.spotify.com/v1/me/player/currently-playing",
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -254,7 +274,8 @@ def current_track(user_id: int = Depends(require_user_id)):
 def get_queue(user_id: int = Depends(require_user_id)):
     token = _get_valid_token(user_id)
 
-    resp = requests.get(
+    resp = _spotify_request(
+        "GET",
         "https://api.spotify.com/v1/me/player/queue",
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -276,7 +297,7 @@ def get_queue(user_id: int = Depends(require_user_id)):
 
 def _player_command(method: str, user_id: int, path: str) -> dict:
     token = _get_valid_token(user_id)
-    resp = requests.request(
+    resp = _spotify_request(
         method,
         f"https://api.spotify.com/v1/me/player/{path}",
         headers={"Authorization": f"Bearer {token}"},

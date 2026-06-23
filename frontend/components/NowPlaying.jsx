@@ -1,11 +1,20 @@
+"use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 
-export default function NowPlaying({ onTrackChange, onProgress }) {
+export default function NowPlaying({
+  onTrackChange,
+  onProgress,
+  onTrackData,
+  accentColor,
+}) {
   const [connected, setConnected] = useState(null);
   const [track, setTrack] = useState(null);
   const [error, setError] = useState(null);
   const lastTrackKey = useRef(null);
+  const fetchInFlightRef = useRef(false);
+
+  const { r = 120, g = 80, b = 200 } = accentColor || {};
 
   const checkStatus = useCallback(() => {
     api
@@ -26,22 +35,22 @@ export default function NowPlaying({ onTrackChange, onProgress }) {
     api
       .getQueue()
       .then((q) => {
-        if (q.track_name) {
+        if (q.track_name)
           api.getLyrics(q.track_name, q.artist || "").catch(() => {});
-        }
       })
       .catch(() => {});
   }, []);
 
   const fetchTrack = useCallback(() => {
-    if (!connected) return;
+    if (!connected || fetchInFlightRef.current) return;
+    fetchInFlightRef.current = true;
     api
       .getCurrentTrack()
       .then((data) => {
         setTrack(data);
         setError(null);
-
-        if (data.is_playing && data.track_name) {
+        onTrackData?.(data);
+        if (data.track_name) {
           const key = `${data.track_name}::${data.artist}`;
           if (key !== lastTrackKey.current) {
             lastTrackKey.current = key;
@@ -49,18 +58,21 @@ export default function NowPlaying({ onTrackChange, onProgress }) {
             prefetchNext();
           }
         }
-
         onProgress?.(data.progress_ms, data.duration_ms, data.is_playing);
       })
       .catch((err) => {
         if (err.status === 401 || err.status === 404) {
           setConnected(false);
           setTrack(null);
+          onTrackData?.(null);
         } else {
           setError(err.message || "Spotify verisi alınamadı.");
         }
+      })
+      .finally(() => {
+        fetchInFlightRef.current = false;
       });
-  }, [connected, onTrackChange, onProgress, prefetchNext]);
+  }, [connected, onTrackChange, onProgress, onTrackData, prefetchNext]);
 
   useEffect(() => {
     if (!connected) return;
@@ -75,16 +87,14 @@ export default function NowPlaying({ onTrackChange, onProgress }) {
       .then((url) => {
         window.location.href = url;
       })
-      .catch((err) =>
-        setError(err.message || "Spotify bağlantısı başlatılamadı."),
-      );
+      .catch((err) => setError(err.message || "Bağlantı başlatılamadı."));
   };
 
   const handlePlayPause = () => {
     const action = track?.is_playing ? api.spotifyPause : api.spotifyPlay;
     action()
       .then(fetchTrack)
-      .catch((err) => setError(err.message || "Komut gönderilemedi."));
+      .catch((err) => setError(err.message || "Komut başarısız."));
   };
 
   const handleNext = () => {
@@ -101,24 +111,19 @@ export default function NowPlaying({ onTrackChange, onProgress }) {
       .catch((err) => setError(err.message || "Önceki şarkıya geçilemedi."));
   };
 
-  if (connected === null) return null;
+  if (connected === null) return <div style={{ height: 80 }} />;
 
   if (!connected) {
     return (
-      <div style={cardStyle}>
-        <p
-          style={{
-            color: "#4A1B0C",
-            fontSize: 14,
-            margin: "0 0 10px",
-            fontFamily: "var(--font-serif, serif)",
-          }}
+      <div style={styles.connectCard}>
+        <p style={styles.connectText}>Spotify ile bağlan</p>
+        <button
+          onClick={handleConnect}
+          style={{ ...styles.connectBtn, background: `rgb(${r},${g},${b})` }}
         >
-          Spotify hesabını bağla
-        </p>
-        <button onClick={handleConnect} style={connectBtnStyle}>
-          Spotify’a bağlan
+          Bağlan
         </button>
+        {error && <p style={styles.errorText}>{error}</p>}
       </div>
     );
   }
@@ -129,16 +134,9 @@ export default function NowPlaying({ onTrackChange, onProgress }) {
       : 0;
 
   return (
-    <div style={cardStyle}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          marginBottom: 10,
-        }}
-      >
-        <div style={coverStyle}>
+    <div style={styles.card}>
+      <div style={styles.trackRow}>
+        <div style={styles.cover}>
           {track?.album_image ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -150,142 +148,156 @@ export default function NowPlaying({ onTrackChange, onProgress }) {
                 objectFit: "cover",
                 borderRadius: 6,
               }}
+              crossOrigin="anonymous"
             />
           ) : (
-            <span style={{ fontSize: 18, color: "#b0a89a" }}>♪</span>
+            <span style={{ fontSize: 20, color: "rgba(255,255,255,0.3)" }}>
+              ♪
+            </span>
           )}
         </div>
-        <div style={{ minWidth: 0 }}>
-          <p style={titleStyle}>
-            {track?.track_name ||
-              (error ? "Veri alınamadı" : "Bir şey çalmıyor")}
-          </p>
-          <p style={subtitleStyle}>{track?.artist || "—"}</p>
+        <div style={styles.trackInfo}>
+          <p style={styles.trackName}>{track?.track_name || "—"}</p>
+          <p style={styles.artistName}>{track?.artist || "—"}</p>
         </div>
       </div>
 
-      <div
-        style={{
-          height: 3,
-          background: "#e8ddc8",
-          borderRadius: 2,
-          overflow: "hidden",
-          marginBottom: 10,
-        }}
-      >
+      <div style={styles.progressBg}>
         <div
           style={{
-            height: "100%",
+            ...styles.progressFill,
             width: `${progressPct}%`,
-            background: "#D85A30",
+            background: `rgb(${r},${g},${b})`,
           }}
         />
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 20,
-        }}
-      >
-        <button onClick={handlePrevious} style={iconBtnStyle}>
+      <div style={styles.controls}>
+        <button onClick={handlePrevious} style={styles.ctrlBtn}>
           ⏮
         </button>
-        <button onClick={handlePlayPause} style={playBtnStyle}>
+        <button
+          onClick={handlePlayPause}
+          style={{ ...styles.playBtn, background: `rgb(${r},${g},${b})` }}
+        >
           {track?.is_playing ? "⏸" : "▶"}
         </button>
-        <button onClick={handleNext} style={iconBtnStyle}>
+        <button onClick={handleNext} style={styles.ctrlBtn}>
           ⏭
         </button>
       </div>
 
-      {error && (
-        <p
-          style={{
-            color: "#D85A30",
-            fontSize: 11,
-            textAlign: "center",
-            marginTop: 8,
-          }}
-        >
-          {error}
-        </p>
-      )}
+      {error && <p style={styles.errorText}>{error}</p>}
     </div>
   );
 }
 
-const cardStyle = {
-  background: "#fff",
-  border: "0.5px solid #e8ddc8",
-  borderRadius: 12,
-  padding: 14,
-  marginBottom: 32,
-  textAlign: "center",
-};
-
-const coverStyle = {
-  width: 44,
-  height: 44,
-  borderRadius: 6,
-  background: "#f0e6d2",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  flexShrink: 0,
-  overflow: "hidden",
-};
-
-const titleStyle = {
-  color: "#4A1B0C",
-  fontSize: 14,
-  fontWeight: 500,
-  margin: 0,
-  fontFamily: "var(--font-serif, serif)",
-  whiteSpace: "nowrap",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  textAlign: "left",
-};
-
-const subtitleStyle = {
-  color: "#9c8f7a",
-  fontSize: 12,
-  margin: 0,
-  textAlign: "left",
-};
-
-const connectBtnStyle = {
-  padding: "10px 20px",
-  borderRadius: 8,
-  border: "none",
-  background: "#D85A30",
-  color: "#fff",
-  cursor: "pointer",
-  fontWeight: 500,
-  fontSize: 14,
-};
-
-const iconBtnStyle = {
-  background: "none",
-  border: "none",
-  color: "#9c8f7a",
-  fontSize: 16,
-  cursor: "pointer",
-  padding: 0,
-};
-
-const playBtnStyle = {
-  width: 30,
-  height: 30,
-  borderRadius: "50%",
-  background: "#D85A30",
-  border: "none",
-  color: "#fff",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  cursor: "pointer",
+const styles = {
+  connectCard: {
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 14,
+    padding: "20px",
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  connectText: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 13,
+    margin: "0 0 12px",
+  },
+  connectBtn: {
+    border: "none",
+    color: "#fff",
+    borderRadius: 999,
+    padding: "9px 22px",
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  card: {
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    backdropFilter: "blur(16px)",
+    borderRadius: 14,
+    padding: "14px",
+    marginBottom: 16,
+  },
+  trackRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 10,
+  },
+  cover: {
+    width: 42,
+    height: 42,
+    borderRadius: 7,
+    background: "rgba(255,255,255,0.08)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    overflow: "hidden",
+  },
+  trackInfo: { minWidth: 0 },
+  trackName: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: 600,
+    margin: 0,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  artistName: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 11,
+    margin: "2px 0 0",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  progressBg: {
+    height: 2,
+    background: "rgba(255,255,255,0.1)",
+    borderRadius: 1,
+    marginBottom: 10,
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: 1,
+    transition: "width 1s linear",
+  },
+  controls: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+  },
+  ctrlBtn: {
+    background: "none",
+    border: "none",
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 15,
+    cursor: "pointer",
+  },
+  playBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: "50%",
+    border: "none",
+    color: "#fff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    fontSize: 12,
+  },
+  errorText: {
+    color: "rgba(255,80,80,0.8)",
+    fontSize: 11,
+    textAlign: "center",
+    marginTop: 6,
+  },
 };

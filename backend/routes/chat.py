@@ -1,4 +1,5 @@
 from datetime import date
+import threading
 
 from fastapi import APIRouter, Depends, HTTPException
 from groq import Groq
@@ -12,6 +13,7 @@ router = APIRouter()
 client = Groq(api_key=GROQ_API_KEY)
 
 _rate_limit: dict[int, tuple[date, int]] = {}
+_rate_limit_lock = threading.Lock()
 
 SYSTEM_PROMPT = (
     "You are an English language tutor helping users learn English through song lyrics. "
@@ -29,17 +31,18 @@ class ChatResponse(BaseModel):
 
 
 def _check_rate_limit(user_id: int) -> None:
-    today = date.today()
-    last_date, count = _rate_limit.get(user_id, (today, 0))
+    with _rate_limit_lock:
+        today = date.today()
+        last_date, count = _rate_limit.get(user_id, (today, 0))
 
-    if last_date != today:
-        _rate_limit[user_id] = (today, 1)
-        return
+        if last_date != today:
+            _rate_limit[user_id] = (today, 1)
+            return
 
-    if count >= FREE_DAILY_LIMIT:
-        raise HTTPException(status_code=429, detail="Günlük mesaj limitine ulaştın.")
+        if count >= FREE_DAILY_LIMIT:
+            raise HTTPException(status_code=429, detail="Günlük mesaj limitine ulaştın.")
 
-    _rate_limit[user_id] = (today, count + 1)
+        _rate_limit[user_id] = (today, count + 1)
 
 
 @router.post("/chat", response_model=ChatResponse)

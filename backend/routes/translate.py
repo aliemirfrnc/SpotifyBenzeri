@@ -16,6 +16,7 @@ _cache_lock = threading.Lock()
 _executor = ThreadPoolExecutor(max_workers=5)
 
 _rate_limit: dict[int, tuple[date, int]] = {}
+_rate_limit_lock = threading.Lock()
 DAILY_LIMIT = 500
 
 
@@ -37,16 +38,17 @@ class TranslateBatchResponse(BaseModel):
 
 
 def _check_rate_limit(user_id: int, cost: int = 1) -> None:
-    today = date.today()
-    last_date, count = _rate_limit.get(user_id, (today, 0))
+    with _rate_limit_lock:
+        today = date.today()
+        last_date, count = _rate_limit.get(user_id, (today, 0))
 
-    if last_date != today:
-        count = 0
+        if last_date != today:
+            count = 0
 
-    if count + cost > DAILY_LIMIT:
-        raise HTTPException(status_code=429, detail="Günlük çeviri limitine ulaştın.")
+        if count + cost > DAILY_LIMIT:
+            raise HTTPException(status_code=429, detail="Günlük çeviri limitine ulaştın.")
 
-    _rate_limit[user_id] = (today, count + cost)
+        _rate_limit[user_id] = (today, count + cost)
 
 
 def _translate_cached(text: str) -> tuple[str | None, bool]:

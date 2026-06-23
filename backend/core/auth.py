@@ -157,5 +157,8 @@ def cleanup_expired() -> int:
     with get_lock():
         cur1 = conn.execute("DELETE FROM refresh_tokens WHERE expires_at < ?", (now,))
         cur2 = conn.execute("DELETE FROM oauth_states WHERE created_at < ?", (now - 600,))
+        cur3 = conn.execute(
+            "DELETE FROM spotify_connect_tokens WHERE created_at < ?", (now - 600,)
+        )
         conn.commit()
-        return cur1.rowcount + cur2.rowcount
+        return cur1.rowcount + cur2.rowcount + cur3.rowcount
