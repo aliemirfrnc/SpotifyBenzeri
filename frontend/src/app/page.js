@@ -5,6 +5,8 @@ import DynamicBackground from "../../components/DynamicBackground";
 import LandingPage from "../../components/LandingPage";
 import LyricsPlayer from "../../components/LyricsPlayer";
 import NowPlaying from "../../components/NowPlaying";
+import PlaylistView from "../../components/PlaylistView";
+import Sidebar from "../../components/Sidebar";
 import WordPanel from "../../components/WordPanel";
 import { api, clearTokens } from "../../lib/api";
 
@@ -15,9 +17,16 @@ export default function Home() {
   const [accentColor, setAccentColor] = useState({ r: 60, g: 60, b: 100 });
   const [albumImage, setAlbumImage] = useState(null);
 
+  // Playlist state
+  const [selectedPlaylist, setSelectedPlaylist] = useState(null);
+  const [selectedTrack, setSelectedTrack] = useState(null);
+  const [centerView, setCenterView] = useState("lyrics"); // "lyrics" | "playlist"
+
+  // NowPlaying state
   const [currentTrackName, setCurrentTrackName] = useState(null);
   const [currentArtist, setCurrentArtist] = useState(null);
 
+  // Word panel state
   const [selectedWord, setSelectedWord] = useState(null);
   const [wordInfo, setWordInfo] = useState(null);
   const [wordLoading, setWordLoading] = useState(false);
@@ -25,27 +34,25 @@ export default function Home() {
   const [lastContextLine, setLastContextLine] = useState("");
   const wordRequestRef = useRef(0);
 
-  // Callbacks refs — LyricsPlayer'a iletmek için
+  // LyricsPlayer callbacks
   const trackChangeCallbackRef = useRef(null);
   const progressCallbackRef = useRef(null);
-  const registerTrackChange = useCallback((callback) => {
-    trackChangeCallbackRef.current = callback;
+  const registerTrackChange = useCallback((cb) => {
+    trackChangeCallbackRef.current = cb;
   }, []);
-  const registerProgress = useCallback((callback) => {
-    progressCallbackRef.current = callback;
+  const registerProgress = useCallback((cb) => {
+    progressCallbackRef.current = cb;
   }, []);
 
+  // Auth check
   useEffect(() => {
     const token = localStorage.getItem("lingofy_access_token");
-    const authRequest = token ? api.me() : Promise.resolve(null);
-    authRequest
+    const req = token ? api.me() : Promise.resolve(null);
+    req
       .then((data) => {
         if (data) setAuthEmail(data.email);
       })
-      .catch(() => {
-        clearTokens();
-        setAuthEmail(null);
-      })
+      .catch(() => clearTokens())
       .finally(() => setAuthChecked(true));
   }, []);
 
@@ -54,7 +61,7 @@ export default function Home() {
     setAuthEmail(null);
   }, []);
 
-  // NowPlaying → LyricsPlayer köprüsü
+  // Spotify → LyricsPlayer bridge
   const handleTrackChange = useCallback((trackName, artist) => {
     setCurrentTrackName(trackName);
     setCurrentArtist(artist);
@@ -69,6 +76,28 @@ export default function Home() {
     setAlbumImage(trackData?.album_image ?? null);
   }, []);
 
+  // Playlist → şarkı seç
+  const handlePlaylistSelect = useCallback((playlist) => {
+    setSelectedPlaylist(playlist);
+    setCenterView("playlist");
+    setSelectedTrack(null);
+  }, []);
+
+  const handleTrackSelect = useCallback((track) => {
+    setSelectedTrack(track);
+    setAlbumImage(track.album_image ?? null);
+
+    // LyricsPlayer'a şarkı bilgisini ilet
+    trackChangeCallbackRef.current?.(track.name, track.artist);
+
+    // Spotify Premium kullanıcısı için çalmayı başlat (başarısız olursa sessizce geç)
+    api.playTrack(`spotify:track:${track.id}`).catch(() => {});
+
+    // Lyrics ekranına geç
+    setCenterView("lyrics");
+  }, []);
+
+  // Word panel
   const handleWordClose = useCallback(() => {
     wordRequestRef.current += 1;
     setSelectedWord(null);
@@ -81,8 +110,7 @@ export default function Home() {
       "",
     );
     if (!cleaned) return;
-    const requestId = wordRequestRef.current + 1;
-    wordRequestRef.current = requestId;
+    const reqId = ++wordRequestRef.current;
 
     setSelectedWord(cleaned);
     setLastContextLine(contextLine);
@@ -93,25 +121,21 @@ export default function Home() {
     api
       .getWordInfo(cleaned, contextLine)
       .then((data) => {
-        if (requestId === wordRequestRef.current) setWordInfo(data);
+        if (reqId === wordRequestRef.current) setWordInfo(data);
       })
       .catch((err) => {
-        if (requestId === wordRequestRef.current) {
+        if (reqId === wordRequestRef.current)
           setWordError(err.message || "Kelime bilgisi alınamadı.");
-        }
       })
       .finally(() => {
-        if (requestId === wordRequestRef.current) setWordLoading(false);
+        if (reqId === wordRequestRef.current) setWordLoading(false);
       });
   }, []);
 
-  if (!authChecked) {
+  if (!authChecked)
     return <div style={{ minHeight: "100vh", background: "#0a0a0a" }} />;
-  }
-
-  if (!authEmail) {
+  if (!authEmail)
     return <LandingPage onAuthenticated={(email) => setAuthEmail(email)} />;
-  }
 
   return (
     <main style={styles.page}>
@@ -121,9 +145,17 @@ export default function Home() {
       />
 
       <div style={styles.layout}>
-        {/* SOL: Player (%68) */}
-        <div style={styles.leftCol}>
-          {/* Header */}
+        {/* SOL: Sidebar */}
+        <Sidebar
+          accentColor={accentColor}
+          selectedPlaylistId={selectedPlaylist?.id}
+          onPlaylistSelect={handlePlaylistSelect}
+          onHomeClick={() => setCenterView("lyrics")}
+        />
+
+        {/* ORTA: Lyrics veya Playlist */}
+        <div style={styles.centerCol}>
+          {/* Ortak header */}
           <div style={styles.header}>
             <span
               style={{
@@ -131,16 +163,15 @@ export default function Home() {
                 color: `rgb(${accentColor.r},${accentColor.g},${accentColor.b})`,
               }}
             >
-              Lingofy
+              {centerView === "playlist" && selectedPlaylist
+                ? selectedPlaylist.name
+                : currentTrackName
+                  ? `${currentTrackName}${currentArtist ? ` — ${currentArtist}` : ""}`
+                  : "Lingofy"}
             </span>
-            {currentTrackName && (
-              <span style={styles.nowPlayingLabel}>
-                {currentTrackName}
-                {currentArtist ? ` — ${currentArtist}` : ""}
-              </span>
-            )}
+            <div style={{ flex: 1 }} />
             <button style={styles.logoutBtn} onClick={handleLogout}>
-              Çıkış
+              Çıkış ({authEmail})
             </button>
           </div>
 
@@ -151,44 +182,51 @@ export default function Home() {
             accentColor={accentColor}
           />
 
-          <div style={styles.lyricsArea}>
-            <LyricsPlayer
-              accentColor={accentColor}
-              onWordClick={handleWordClick}
-              onTrackChange={registerTrackChange}
-              onProgress={registerProgress}
-            />
+          <div style={styles.contentArea}>
+            {centerView === "playlist" && selectedPlaylist ? (
+              <PlaylistView
+                playlist={selectedPlaylist}
+                accentColor={accentColor}
+                onTrackSelect={handleTrackSelect}
+                selectedTrackId={selectedTrack?.id}
+                onClose={() => setCenterView("lyrics")}
+              />
+            ) : (
+              <LyricsPlayer
+                accentColor={accentColor}
+                onWordClick={handleWordClick}
+                onTrackChange={registerTrackChange}
+                onProgress={registerProgress}
+              />
+            )}
           </div>
         </div>
 
-        {/* SAĞ: Sidebar (%32) */}
+        {/* SAĞ: Word panel veya Chat */}
         <div style={styles.rightCol}>
           {selectedWord ? (
-            <WordPanel
-              selectedWord={selectedWord}
-              wordInfo={wordInfo}
-              wordLoading={wordLoading}
-              wordError={wordError}
-              accentColor={accentColor}
-              onRetry={() => handleWordClick(selectedWord, lastContextLine)}
-              onClose={handleWordClose}
-            />
+            <>
+              <WordPanel
+                selectedWord={selectedWord}
+                wordInfo={wordInfo}
+                wordLoading={wordLoading}
+                wordError={wordError}
+                accentColor={accentColor}
+                onRetry={() => handleWordClick(selectedWord, lastContextLine)}
+                onClose={handleWordClose}
+              />
+              <div style={{ marginTop: 12, flex: 1, minHeight: 0 }}>
+                <Chat accentColor={accentColor} />
+              </div>
+            </>
           ) : (
             <Chat accentColor={accentColor} />
-          )}
-
-          {selectedWord && (
-            <div style={{ marginTop: 12, flexShrink: 0 }}>
-              <Chat accentColor={accentColor} />
-            </div>
           )}
         </div>
       </div>
 
       <style>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
+        @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes typingBlink {
           0%, 60%, 100% { opacity: 0.2; }
           30% { opacity: 1; }
@@ -211,15 +249,15 @@ const styles = {
     zIndex: 1,
     display: "flex",
     height: "100vh",
-    gap: 0,
   },
-  leftCol: {
-    flex: "0 0 68%",
+  centerCol: {
+    flex: 1,
     display: "flex",
     flexDirection: "column",
     height: "100vh",
     overflow: "hidden",
-    padding: "16px 20px 0 24px",
+    padding: "16px 12px 0 16px",
+    minWidth: 0,
   },
   header: {
     display: "flex",
@@ -229,41 +267,39 @@ const styles = {
     flexShrink: 0,
   },
   logoMini: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: 700,
     letterSpacing: "-0.02em",
     flexShrink: 0,
-  },
-  nowPlayingLabel: {
-    flex: 1,
-    fontSize: 12,
-    color: "rgba(255,255,255,0.35)",
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
+    maxWidth: 300,
   },
   logoutBtn: {
     background: "none",
     border: "1px solid rgba(255,255,255,0.1)",
-    color: "rgba(255,255,255,0.35)",
+    color: "rgba(255,255,255,0.3)",
     borderRadius: 6,
     padding: "4px 10px",
     fontSize: 11,
     cursor: "pointer",
     flexShrink: 0,
+    whiteSpace: "nowrap",
   },
-  lyricsArea: {
+  contentArea: {
     flex: 1,
     minHeight: 0,
     position: "relative",
   },
   rightCol: {
-    flex: "0 0 32%",
+    width: 300,
+    flexShrink: 0,
     display: "flex",
     flexDirection: "column",
     height: "100vh",
-    padding: "16px 20px 20px 4px",
-    gap: 12,
+    padding: "16px 16px 20px 4px",
+    gap: 0,
     overflow: "hidden",
   },
 };

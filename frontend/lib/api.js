@@ -51,16 +51,21 @@ async function handleResponse(res) {
 
 async function request(path, options = {}) {
   if (!BASE_URL) {
-    throw new Error("API adresi yapılandırılmamış. NEXT_PUBLIC_API_URL değerini kontrol et.");
+    throw new Error(
+      "API adresi yapılandırılmamış. NEXT_PUBLIC_API_URL değerini kontrol et.",
+    );
   }
 
   try {
     return await fetch(`${BASE_URL}${path}`, options);
   } catch (error) {
     if (error?.name === "AbortError") throw error;
-    throw new Error("Sunucuya ulaşılamadı. Bağlantını ve API adresini kontrol et.", {
-      cause: error,
-    });
+    throw new Error(
+      "Sunucuya ulaşılamadı. Bağlantını ve API adresini kontrol et.",
+      {
+        cause: error,
+      },
+    );
   }
 }
 

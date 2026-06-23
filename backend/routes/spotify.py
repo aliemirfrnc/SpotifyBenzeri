@@ -19,7 +19,11 @@ from backend.routes.auth import require_user_id
 
 router = APIRouter(prefix="/spotify")
 
-SCOPE = "user-read-currently-playing user-read-playback-state user-modify-playback-state"
+
+SCOPE = (
+    "user-read-currently-playing user-read-playback-state "
+    "user-modify-playback-state playlist-read-private playlist-read-collaborative"
+)
 
 CONNECT_TOKEN_TTL_SECONDS = 120
 SPOTIFY_TIMEOUT_SECONDS = 10
@@ -336,3 +340,138 @@ def next_track(user_id: int = Depends(require_user_id)):
 @router.post("/previous")
 def previous_track(user_id: int = Depends(require_user_id)):
     return _player_command("POST", user_id, "previous")
+
+# ─── Playlist endpoints ────────────────────────────────────────────────────
+
+class PlaylistItem(BaseModel):
+    id: str
+    name: str
+    image: str | None = None
+    track_count: int
+
+
+class PlaylistsResponse(BaseModel):
+    playlists: list[PlaylistItem]
+
+
+class TrackItem(BaseModel):
+    id: str
+    name: str
+    artist: str
+    album: str
+    album_image: str | None = None
+    duration_ms: int
+
+
+class PlaylistTracksResponse(BaseModel):
+    playlist_name: str
+    tracks: list[TrackItem]
+
+
+@router.get("/playlists", response_model=PlaylistsResponse)
+def get_playlists(user_id: int = Depends(require_user_id)):
+    token = _get_valid_token(user_id)
+    items = []
+    url = "https://api.spotify.com/v1/me/playlists"
+
+    while url:
+        resp = _spotify_request(
+            "GET",
+            url,
+            params={"limit": 50},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail="Playlist listesi alınamadı.")
+
+        data = resp.json()
+        for pl in data.get("items", []):
+            if not pl:
+                continue
+            images = pl.get("images") or []
+            items.append({
+                "id": pl["id"],
+                "name": pl["name"],
+                "image": images[0]["url"] if images else None,
+                "track_count": pl.get("tracks", {}).get("total", 0),
+            })
+        url = data.get("next")
+
+    return {"playlists": items}
+
+
+@router.get("/playlist/{playlist_id}", response_model=PlaylistTracksResponse)
+def get_playlist_tracks(playlist_id: str, user_id: int = Depends(require_user_id)):
+    token = _get_valid_token(user_id)
+
+    # Playlist meta
+    pl_resp = _spotify_request(
+        "GET",
+        f"https://api.spotify.com/v1/playlists/{playlist_id}",
+        params={"fields": "name"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    if pl_resp.status_code != 200:
+        raise HTTPException(status_code=pl_resp.status_code, detail="Playlist bulunamadı.")
+
+    playlist_name = pl_resp.json().get("name", "Playlist")
+    tracks = []
+    url = f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks"
+
+    while url:
+        resp = _spotify_request(
+            "GET",
+            url,
+            params={"limit": 50, "fields": "next,items(track(id,name,duration_ms,artists,album(name,images)))"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail="Şarkılar alınamadı.")
+
+        data = resp.json()
+        for item in data.get("items", []):
+            track = item.get("track")
+            if not track or not track.get("id"):
+                continue
+            images = track.get("album", {}).get("images") or []
+            tracks.append({
+                "id": track["id"],
+                "name": track["name"],
+                "artist": ", ".join(a["name"] for a in track.get("artists", [])),
+                "album": track.get("album", {}).get("name", ""),
+                "album_image": images[0]["url"] if images else None,
+                "duration_ms": track.get("duration_ms", 0),
+            })
+        url = data.get("next")
+
+    return {"playlist_name": playlist_name, "tracks": tracks}
+
+
+@router.put("/play-track")
+def play_track(body: dict, user_id: int = Depends(require_user_id)):
+    """Belirli bir şarkıyı çalmaya başlar (Spotify Premium gerektirir)."""
+    token = _get_valid_token(user_id)
+    uri = body.get("uri")
+    if not uri:
+        raise HTTPException(status_code=400, detail="Şarkı URI'si gerekli.")
+
+    resp = _spotify_request(
+        "PUT",
+        "https://api.spotify.com/v1/me/player/play",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"uris": [uri]},
+    )
+
+    if resp.status_code in (200, 204):
+        return {"status": "ok"}
+
+    reason = ""
+    try:
+        reason = resp.json().get("error", {}).get("reason", "")
+    except ValueError:
+        pass
+
+    if reason == "NO_ACTIVE_DEVICE" or resp.status_code == 404:
+        raise HTTPException(status_code=404, detail=NO_ACTIVE_DEVICE_MESSAGE)
+
+    raise HTTPException(status_code=resp.status_code, detail="Şarkı çalınamadı.")
