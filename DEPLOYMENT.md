@@ -5,9 +5,10 @@ This document outlines how to deploy Lingofy to a production Ubuntu server using
 ## 1. Server Requirements
 
 - **OS:** Ubuntu 22.04 LTS
-- **RAM:** Minimum 2GB (4GB recommended for AI caching overhead)
-- **CPU:** 2 vCores
+- **RAM:** Minimum 4GB (8GB recommended for Postgres, Redis, and AI overhead)
+- **CPU:** 2-4 vCores
 - **Network:** Port 80 (HTTP), 443 (HTTPS), 22 (SSH) open.
+- **Databases:** PostgreSQL (Primary DB), Redis (Caching & Rate Limiting)
 
 ## 2. Environment Variables (`.env`)
 
@@ -20,6 +21,10 @@ ALLOWED_ORIGINS=https://lingofy.app
 # API KEYS
 GROQ_API_KEY=gsk_...
 OPENROUTER_API_KEY=sk-or-v1-...
+
+# DATABASE & CACHE
+DATABASE_URL=postgresql://user:password@localhost/lingofy
+REDIS_URL=redis://localhost:6379/0
 
 # SPOTIFY OAUTH
 SPOTIFY_CLIENT_ID=your_client_id

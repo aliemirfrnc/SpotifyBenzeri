@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import ErrorBanner from "./ErrorBanner";
 import PronunciationCoach from "./PronunciationCoach";
 import ShadowingMode from "./ShadowingMode";
+import { useTranslationQueue } from "../hooks/useTranslationQueue";
 
 export default memo(function LyricsPlayer({
   accentColor,
@@ -13,7 +14,9 @@ export default memo(function LyricsPlayer({
 }) {
   const [lyrics, setLyrics] = useState([]);
   const [synced, setSynced] = useState(null);
-  const [translation, setTranslation] = useState({});
+  
+  const { translation, setTranslation, translateLineQueue, resetQueue, lastTrackRef } = useTranslationQueue();
+
   const [selectedLine, setSelectedLine] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -34,15 +37,9 @@ export default memo(function LyricsPlayer({
   const containerRef = useRef(null);
   const idleTimerRef = useRef(null);
   const programmaticScrollUntil = useRef(0);
-  const lastTrackRef = useRef(null);
   const lastArtistRef = useRef(null);
   const lyricsRequestRef = useRef(0);
   const lyricsAbortRef = useRef(null);
-  
-  const translatingLinesRef = useRef(new Set());
-  const translationQueueRef = useRef([]);
-  const activeTranslatingRef = useRef(0);
-  const translationAbortRef = useRef(null);
 
   const { r = 120, g = 80, b = 200 } = accentColor || {};
 
@@ -72,19 +69,13 @@ export default memo(function LyricsPlayer({
     const controller = new AbortController();
     lyricsAbortRef.current = controller;
     
-    translationAbortRef.current?.abort();
-    translationAbortRef.current = new AbortController();
-    translatingLinesRef.current.clear();
-    translationQueueRef.current = [];
-    activeTranslatingRef.current = 0;
+    resetQueue(track);
 
-    lastTrackRef.current = track;
     lastArtistRef.current = artist;
 
     setLoading(true);
     setError(null);
     setErrorStatus(null);
-    setTranslation({});
     setSelectedLine(null);
     setSynced(null);
     setAutoFollow(true);
@@ -112,7 +103,6 @@ export default memo(function LyricsPlayer({
   useEffect(
     () => () => {
       lyricsAbortRef.current?.abort();
-      translationAbortRef.current?.abort();
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     },
     [],
@@ -163,36 +153,6 @@ export default memo(function LyricsPlayer({
       el.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }, [activeLineIndex, autoFollow]);
-
-  const processTranslationQueue = useCallback(() => {
-    if (activeTranslatingRef.current >= 3 || translationQueueRef.current.length === 0) return;
-    const task = translationQueueRef.current.shift();
-    if (!task) return;
-
-    activeTranslatingRef.current++;
-    api.translateLine(task.line, lastTrackRef.current, { signal: translationAbortRef.current?.signal })
-      .then((data) => {
-        setTranslation(curr => ({ ...curr, [task.line]: data.translation }));
-      })
-      .catch((err) => {
-        if (err.name !== 'AbortError') {
-           setTranslation(curr => ({ ...curr, [task.line]: null }));
-        }
-      })
-      .finally(() => {
-        activeTranslatingRef.current--;
-        processTranslationQueue(); // Process next in queue
-      });
-      
-    processTranslationQueue(); // Try to spawn up to 3 workers
-  }, []);
-
-  const translateLineQueue = useCallback((line) => {
-    if (!line || translatingLinesRef.current.has(line)) return;
-    translatingLinesRef.current.add(line);
-    translationQueueRef.current.push({ line });
-    processTranslationQueue();
-  }, [processTranslationQueue]);
 
   useEffect(() => {
     if (activeLineIndex === null || !lyrics.length) return;

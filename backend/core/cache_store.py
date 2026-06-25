@@ -3,9 +3,67 @@ import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
+import os
+import logging
 
 _LOCK = threading.Lock()
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+
+logger = logging.getLogger(__name__)
+
+# Redis Initialization Fallback
+REDIS_URL = os.getenv("REDIS_URL", "")
+redis_client = None
+
+try:
+    if REDIS_URL:
+        import redis
+        redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+        redis_client.ping()
+        logger.info("Connected to Redis cache.")
+except Exception as e:
+    logger.warning(f"Failed to connect to Redis, falling back to Memory Cache: {e}")
+    redis_client = None
+
+
+class RedisCacheWrapper:
+    """Wrapper to make Redis behave like the TTLLRUCache for simple get/set operations."""
+    def __init__(self, name: str, ttl_seconds: int = 604800):
+        self.name = name
+        self.ttl_seconds = ttl_seconds
+        self.client = redis_client
+
+    def _k(self, key: str) -> str:
+        return f"{self.name}:{key}"
+
+    def get(self, key: str, default=None):
+        val = self.client.get(self._k(key))
+        if val is None:
+            return default
+        try:
+            return json.loads(val)
+        except Exception:
+            return val
+
+    def set(self, key: str, value):
+        self.client.setex(self._k(key), self.ttl_seconds, json.dumps(value))
+
+    def save(self):
+        # Redis handles persistence independently based on its redis.conf
+        pass
+
+    def __contains__(self, key: str) -> bool:
+        return self.client.exists(self._k(key)) > 0
+
+    def __getitem__(self, key: str):
+        val = self.get(key)
+        if val is None:
+            raise KeyError(key)
+        return val
+        
+    def __setitem__(self, key: str, value):
+        self.set(key, value)
+
 
 class TTLLRUCache:
     def __init__(self, name: str, max_size: int = 1000, ttl_seconds: int = 604800): # 7 days
@@ -88,18 +146,23 @@ class TTLLRUCache:
     def __setitem__(self, key: str, value):
         self.set(key, value)
 
-_caches: dict[str, TTLLRUCache] = {}
+
+_caches: dict = {}
 _caches_lock = threading.Lock()
 
-def get_cache(name: str, max_size: int = 1000, ttl_seconds: int = 604800) -> TTLLRUCache:
+def get_cache(name: str, max_size: int = 1000, ttl_seconds: int = 604800):
     with _caches_lock:
         if name not in _caches:
-            _caches[name] = TTLLRUCache(name, max_size, ttl_seconds)
+            if redis_client:
+                _caches[name] = RedisCacheWrapper(name, ttl_seconds)
+            else:
+                _caches[name] = TTLLRUCache(name, max_size, ttl_seconds)
         return _caches[name]
 
-def load(name: str) -> TTLLRUCache:
+def load(name: str):
     return get_cache(name)
 
 def save(name: str, dummy_data=None) -> None:
     cache = get_cache(name)
-    cache.save()
+    if hasattr(cache, "save"):
+        cache.save()

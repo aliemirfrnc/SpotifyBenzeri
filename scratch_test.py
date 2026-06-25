@@ -1,11 +1,13 @@
-import requests
 import os
+from backend.core.config import JWT_SECRET
+from backend.core.auth import create_token_pair, decode_access_token
 
-url = "http://127.0.0.1:8000/api/pronunciation/analyze"
+def test():
+    print(f"JWT_SECRET from config: {JWT_SECRET}")
+    access_token, refresh_token = create_token_pair(1, "test@test.com")
+    print(f"Generated Access Token: {access_token[:20]}...")
+    decoded_user = decode_access_token(access_token)
+    print(f"Decoded User ID: {decoded_user}")
 
-# Create dummy audio file
-with open("dummy.webm", "wb") as f:
-    f.write(b"dummy data")
-
-# To bypass authentication (assuming we have an endpoint to get a token, but wait, the endpoint requires a user id!)
-# Let's check how auth works.
+if __name__ == "__main__":
+    test()

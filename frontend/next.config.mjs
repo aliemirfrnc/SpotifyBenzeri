@@ -10,6 +10,14 @@ const nextConfig = {
     root: __dirname,
   },
   allowedDevOrigins: ["127.0.0.1"],
+  async rewrites() {
+    return [
+      {
+        source: '/api_proxy/:path*',
+        destination: 'http://127.0.0.1:8000/:path*', // Proxy to Backend
+      },
+    ]
+  },
 };
 
 export default nextConfig;

@@ -2,8 +2,11 @@ import secrets
 import threading
 import time
 from urllib.parse import urlencode
+import logging
 
 import requests
+
+logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -218,6 +221,12 @@ def spotify_callback(code: str = Query(...), state: str = Query(...)):
     return RedirectResponse(f"{FRONTEND_URL}?spotify_connected=1")
 
 
+def _delete_spotify_tokens(user_id: int) -> None:
+    conn = get_conn()
+    with get_lock():
+        conn.execute("DELETE FROM spotify_accounts WHERE user_id = ?", (user_id,))
+        conn.commit()
+
 def _get_valid_token(user_id: int) -> str:
     lock = _get_refresh_lock(user_id)
     with lock:
@@ -242,7 +251,8 @@ def _get_valid_token(user_id: int) -> str:
         )
         if resp.status_code != 200:
             logger.error(f"SPOTIFY REFRESH ERROR: {resp.status_code} {resp.text}")
-            raise HTTPException(status_code=400, detail="Token yenilenemedi.")
+            _delete_spotify_tokens(user_id)
+            raise HTTPException(status_code=404, detail="Spotify yetkisi iptal edilmiş. Sayfayı yenileyip tekrar bağlanın.")
 
         data = resp.json()
         new_refresh = data.get("refresh_token", refresh_token)
